@@ -993,6 +993,24 @@ void Create_Closest_Hit_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCom
 }
 
 /**
+* Load and create the DXR Shadow Miss program and root signature.
+*/
+void Create_Shadow_Miss_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompilerInfo &shaderCompiler)
+{
+    dxr.shadowMiss = RtProgram(D3D12ShaderInfo(L"shaders\\ShadowMiss.hlsl", L"", L"lib_6_3"));
+    D3DShaders::Compile_Shader(shaderCompiler, dxr.shadowMiss);
+}
+
+/**
+* Load and create the DXR Shadow Closest Hit program and root signature.
+*/
+void Create_Shadow_Closest_Hit_Program(D3D12Global &d3d, DXRGlobal &dxr, D3D12ShaderCompilerInfo &shaderCompiler)
+{
+    dxr.shadowClosestHit = RtProgram(D3D12ShaderInfo(L"shaders\\ShadowClosestHit.hlsl", L"", L"lib_6_3"));
+    D3DShaders::Compile_Shader(shaderCompiler, dxr.shadowClosestHit);
+}
+
+/**
 * Create the DXR pipeline state object.
 */
 void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
@@ -1008,7 +1026,7 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 	// 1 for Pipeline Config	
 	UINT index = 0;
 	vector<D3D12_STATE_SUBOBJECT> subobjects;
-	subobjects.resize(10);
+	subobjects.resize(15);
 	
 	// Add state subobject for the RGS
 	D3D12_EXPORT_DESC rgsExportDesc = {};
@@ -1064,6 +1082,42 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 
 	subobjects[index++] = chs;
 
+    // Add state subobject for the Shadow Miss shader
+    D3D12_EXPORT_DESC smsExportDesc = {};
+    smsExportDesc.Name = L"ShadowMiss_5";
+    smsExportDesc.ExportToRename = L"Miss";
+    smsExportDesc.Flags = D3D12_EXPORT_FLAG_NONE;
+
+    D3D12_DXIL_LIBRARY_DESC	smsLibDesc = {};
+    smsLibDesc.DXILLibrary.BytecodeLength = dxr.shadowMiss.blob->GetBufferSize();
+    smsLibDesc.DXILLibrary.pShaderBytecode = dxr.shadowMiss.blob->GetBufferPointer();
+    smsLibDesc.NumExports = 1;
+    smsLibDesc.pExports = &smsExportDesc;
+
+    D3D12_STATE_SUBOBJECT sms = {};
+    sms.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+    sms.pDesc = &smsLibDesc;
+
+    subobjects[index++] = sms;
+
+    // Add state subobject for the Shadow Closest Hit shader
+    D3D12_EXPORT_DESC schsExportDesc = {};
+    schsExportDesc.Name = L"ShadowClosestHit_76";
+    schsExportDesc.ExportToRename = L"ClosestHit";
+    schsExportDesc.Flags = D3D12_EXPORT_FLAG_NONE;
+
+    D3D12_DXIL_LIBRARY_DESC	schsLibDesc = {};
+    schsLibDesc.DXILLibrary.BytecodeLength = dxr.shadowClosestHit.blob->GetBufferSize();
+    schsLibDesc.DXILLibrary.pShaderBytecode = dxr.shadowClosestHit.blob->GetBufferPointer();
+    schsLibDesc.NumExports = 1;
+    schsLibDesc.pExports = &schsExportDesc;
+
+    D3D12_STATE_SUBOBJECT schs = {};
+    schs.Type = D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY;
+    schs.pDesc = &schsLibDesc;
+
+    subobjects[index++] = schs;
+
 	// Add a state subobject for the hit group
 	D3D12_HIT_GROUP_DESC hitGroupDesc = {};
 	hitGroupDesc.ClosestHitShaderImport = L"ClosestHit_76";
@@ -1073,7 +1127,19 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 	hitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
 	hitGroup.pDesc = &hitGroupDesc;
 
-	subobjects[index++] = hitGroup;
+    subobjects[index++] = hitGroup;
+
+
+    // Add a state subobject for the shadow hit group
+    D3D12_HIT_GROUP_DESC shadowHitGroupDesc = {};
+    shadowHitGroupDesc.ClosestHitShaderImport = L"ShadowClosestHit_76";
+    shadowHitGroupDesc.HitGroupExport = L"ShadowHitGroup";
+
+    D3D12_STATE_SUBOBJECT shadowHitGroup = {};
+    shadowHitGroup.Type = D3D12_STATE_SUBOBJECT_TYPE_HIT_GROUP;
+    shadowHitGroup.pDesc = &shadowHitGroupDesc;
+
+	subobjects[index++] = shadowHitGroup;
 
 	// Add a state subobject for the shader payload configuration
 	D3D12_RAYTRACING_SHADER_CONFIG shaderDesc = {};
@@ -1101,6 +1167,32 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 
 	subobjects[index++] = shaderPayloadAssociationObject;
 
+    // Add a state subobject for the shadow shader payload configuration
+    D3D12_RAYTRACING_SHADER_CONFIG shadowShaderDesc = {};
+    shadowShaderDesc.MaxPayloadSizeInBytes = sizeof(XMFLOAT4);	// bool
+    shadowShaderDesc.MaxAttributeSizeInBytes = D3D12_RAYTRACING_MAX_ATTRIBUTE_SIZE_IN_BYTES;
+
+    D3D12_STATE_SUBOBJECT shadowShaderConfigObject = {};
+    shadowShaderConfigObject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG;
+    shadowShaderConfigObject.pDesc = &shadowShaderDesc;
+
+    subobjects[index++] = shadowShaderConfigObject;
+
+    // Create a list of the shader export names that use the payload
+    const WCHAR* shadowShaderExports[] = { L"ShadowMiss_5", L"ShadowHitGroup" };
+
+    // Add a state subobject for the association between shaders and the payload
+    D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION shadowShaderPayloadAssociation = {};
+    shadowShaderPayloadAssociation.NumExports = _countof(shadowShaderExports);
+    shadowShaderPayloadAssociation.pExports = shadowShaderExports;
+    shadowShaderPayloadAssociation.pSubobjectToAssociate = &subobjects[(index - 1)];
+
+    D3D12_STATE_SUBOBJECT shadowShaderPayloadAssociationObject = {};
+    shadowShaderPayloadAssociationObject.Type = D3D12_STATE_SUBOBJECT_TYPE_SUBOBJECT_TO_EXPORTS_ASSOCIATION;
+    shadowShaderPayloadAssociationObject.pDesc = &shadowShaderPayloadAssociation;
+
+    subobjects[index++] = shadowShaderPayloadAssociationObject;
+
 	// Add a state subobject for the shared root signature 
 	D3D12_STATE_SUBOBJECT rayGenRootSigObject = {};
 	rayGenRootSigObject.Type = D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE;
@@ -1109,7 +1201,7 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 	subobjects[index++] = rayGenRootSigObject;
 
 	// Create a list of the shader export names that use the root signature
-	const WCHAR* rootSigExports[] = { L"RayGen_12", L"HitGroup", L"Miss_5" };
+	const WCHAR* rootSigExports[] = { L"RayGen_12", L"HitGroup", L"Miss_5", L"ShadowHitGroup", L"ShadowMiss_5" };
 
 	// Add a state subobject for the association between the RayGen shader and the local root signature
 	D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION rayGenShaderRootSigAssociation = {};
@@ -1131,7 +1223,7 @@ void Create_Pipeline_State_Object(D3D12Global &d3d, DXRGlobal &dxr)
 
 	// Add a state subobject for the ray tracing pipeline config
 	D3D12_RAYTRACING_PIPELINE_CONFIG pipelineConfig = {};
-	pipelineConfig.MaxTraceRecursionDepth = 1;
+	pipelineConfig.MaxTraceRecursionDepth = 2;
 
 	D3D12_STATE_SUBOBJECT pipelineConfigObject = {};
 	pipelineConfigObject.Type = D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG;
@@ -1166,8 +1258,10 @@ void Create_Shader_Table(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resou
 	The Shader Table layout is as follows:
 		Entry 0 - Ray Generation shader
 		Entry 1 - Miss shader
-		Entry 2 - Closest Hit shader
-	All shader records in the Shader Table must have the same size, so shader record size will be based on the largest required entry.
+        Entry 2 - Shadow Miss shader
+        Entry 3 - Closest Hit shader
+        Entry 4 - Shadow Closest Hit shader
+    All shader records in the Shader Table must have the same size, so shader record size will be based on the largest required entry.
 	The ray generation program requires the largest entry: 
 		32 bytes - D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES 
 	  +  8 bytes - a CBV/SRV/UAV descriptor table pointer (64-bits)
@@ -1182,7 +1276,7 @@ void Create_Shader_Table(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resou
 	dxr.shaderTableRecordSize += 8;							// CBV/SRV/UAV descriptor table
 	dxr.shaderTableRecordSize = ALIGN(D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT, dxr.shaderTableRecordSize);
 
-	shaderTableSize = (dxr.shaderTableRecordSize * 3);		// 3 shader records in the table
+	shaderTableSize = (dxr.shaderTableRecordSize * 5);		// 3 shader records in the table
 	shaderTableSize = ALIGN(D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT, shaderTableSize);
 
 	// Create the shader table buffer
@@ -1207,12 +1301,23 @@ void Create_Shader_Table(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resou
 	pData += dxr.shaderTableRecordSize;
 	memcpy(pData, dxr.rtpsoInfo->GetShaderIdentifier(L"Miss_5"), shaderIdSize);
 
-	// Shader Record 2 - Closest Hit program and local root parameter data (descriptor table with constant buffer and IB/VB pointers)
+    // Shader Record 2 - Shadow miss program (no local root arguments to set)
+    pData += dxr.shaderTableRecordSize;
+    memcpy(pData, dxr.rtpsoInfo->GetShaderIdentifier(L"ShadowMiss_5"), shaderIdSize);
+
+	// Shader Record 3 - Closest Hit program and local root parameter data (descriptor table with constant buffer and IB/VB pointers)
 	pData += dxr.shaderTableRecordSize;
 	memcpy(pData, dxr.rtpsoInfo->GetShaderIdentifier(L"HitGroup"), shaderIdSize);
 
 	// Set the root parameter data. Point to start of descriptor heap.
 	*reinterpret_cast<D3D12_GPU_DESCRIPTOR_HANDLE*>(pData + shaderIdSize) = resources.descriptorHeap->GetGPUDescriptorHandleForHeapStart();
+
+    // Shader Record 4 - Closest Hit program and local root parameter data (descriptor table with constant buffer and IB/VB pointers)
+    pData += dxr.shaderTableRecordSize;
+    memcpy(pData, dxr.rtpsoInfo->GetShaderIdentifier(L"ShadowHitGroup"), shaderIdSize);
+
+    // Set the root parameter data. Point to start of descriptor heap.
+    *reinterpret_cast<D3D12_GPU_DESCRIPTOR_HANDLE*>(pData + shaderIdSize) = resources.descriptorHeap->GetGPUDescriptorHandleForHeapStart();
 
 	// Unmap
 	dxr.shaderTable->Unmap(0, nullptr);
@@ -1379,11 +1484,11 @@ void Build_Command_List(D3D12Global &d3d, DXRGlobal &dxr, D3D12Resources &resour
 	desc.RayGenerationShaderRecord.SizeInBytes = dxr.shaderTableRecordSize;
 
 	desc.MissShaderTable.StartAddress = dxr.shaderTable->GetGPUVirtualAddress() + dxr.shaderTableRecordSize;
-	desc.MissShaderTable.SizeInBytes = dxr.shaderTableRecordSize;		// Only a single Miss program entry
+	desc.MissShaderTable.SizeInBytes = dxr.shaderTableRecordSize * 2;		// Only a single Miss program entry
 	desc.MissShaderTable.StrideInBytes = dxr.shaderTableRecordSize;
 
-	desc.HitGroupTable.StartAddress = dxr.shaderTable->GetGPUVirtualAddress() + (dxr.shaderTableRecordSize * 2);
-	desc.HitGroupTable.SizeInBytes = dxr.shaderTableRecordSize;			// Only a single Hit program entry
+	desc.HitGroupTable.StartAddress = dxr.shaderTable->GetGPUVirtualAddress() + (dxr.shaderTableRecordSize * 3);
+	desc.HitGroupTable.SizeInBytes = dxr.shaderTableRecordSize * 2;			// Only a single Hit program entry
 	desc.HitGroupTable.StrideInBytes = dxr.shaderTableRecordSize;
 
 	desc.Width = d3d.width;

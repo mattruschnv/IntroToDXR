@@ -317,6 +317,8 @@ struct DXRGlobal
 	RtProgram										rgs;
 	RtProgram										miss;
 	HitProgram										hit;
+    RtProgram										shadowClosestHit;
+    RtProgram										shadowMiss;
 
 	ID3D12StateObject*								rtpso = nullptr;
 	ID3D12StateObjectProperties*					rtpsoInfo = nullptr;

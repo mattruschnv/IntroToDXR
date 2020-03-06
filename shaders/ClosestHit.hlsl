@@ -39,5 +39,26 @@ void ClosestHit(inout HitInfo payload, Attributes attrib)
 	int2 coord = floor(vertex.uv * textureResolution.x);
 	float3 color = albedo.Load(int3(coord, 0)).rgb;
 
-	payload.ShadedColorAndHitT = float4(color, RayTCurrent());
+    // cast shadow ray
+    ShadowHitInfo shadowPayload;
+    shadowPayload.hit = false;
+
+    RayDesc shadowRay;
+    shadowRay.Origin = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
+    shadowRay.Direction = normalize(float3(1.0f, 1.0f, 1.0f));
+    shadowRay.TMin = 0.1f;
+    shadowRay.TMax = 1000.0f;
+
+    TraceRay(
+        SceneBVH,
+        RAY_FLAG_NONE,
+        0xFF,
+        1,
+        0,
+        1,
+        shadowRay,
+        shadowPayload);
+
+    float shadow = shadowPayload.hit ? 0.2f : 1.0f;
+	payload.ShadedColorAndHitT = float4(color, RayTCurrent()) * shadow;
 }
